@@ -27,7 +27,9 @@ export function resolveDesktopRetentionRunner(env: NodeJS.ProcessEnv): string {
   const target = resolveDesktopBuildTarget(env)
   const routes = desktopPublishRunnersSchema.parse(JSON.parse(required(env, 'DESKTOP_PUBLISH_RUNNERS')))
   const route = routes[required(env, 'RUNNER_NAME')]
-  if (!route || !route.target.includes(target)
+  // Provisioned CI runners cover the platforms that publish an installer; a Linux target has no route.
+  const routed: readonly string[] = route?.target ?? []
+  if (!route || !routed.includes(target)
     || new Set(Object.values(routes).map(item => item.label)).size !== Object.keys(routes).length) {
     throw new Error('desktop retention: original machine requires a unique artifact routing label')
   }

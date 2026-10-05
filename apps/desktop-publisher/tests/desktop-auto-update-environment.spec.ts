@@ -109,7 +109,8 @@ describe('desktop auto-update environment', () => {
       DSH_DESKTOP_AUTO_UPDATE_ENV: 'staging',
     })).toThrow(/test.*production/u)
     expect(() => resolveDesktopAutoUpdateTarget('linux', 'x64')).toThrow(/unsupported target/u)
-    expect(() => desktopBuildRecordFilename('linux-x64' as 'mac-arm64')).toThrow(/unsupported target/u)
+    // A Linux target ships no update feed, but it still writes a build record, so record naming accepts it.
+    expect(desktopBuildRecordFilename('linux-x64')).toBe('linux-x64-release.json')
   })
 
   it('uses Nightly metadata for stable and prerelease Desktop versions', () => {

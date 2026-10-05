@@ -40,6 +40,11 @@ export interface DesktopRolloutPlan {
 export async function prepareDesktopRollout(directory: string, manifest: DesktopRetainedManifest,
   environment: NodeJS.ProcessEnv): Promise<DesktopRolloutPlan> {
   const source = manifest.source
+  // A Linux package writes a build record but ships no installer-owned update feed, so there is no
+  // channel metadata for it to roll out.
+  if (source.target === 'linux-x64' || source.target === 'linux-arm64') {
+    throw new Error('desktop rollout: Linux packages have no update channel to roll out')
+  }
   const windows = source.target === 'win-x64'
   const platform = windows ? 'win32' : 'darwin'
   const update = resolveDesktopUploadConfig({ ...environment, DSH_DESKTOP_UPDATE_CHANNEL: source.channel },

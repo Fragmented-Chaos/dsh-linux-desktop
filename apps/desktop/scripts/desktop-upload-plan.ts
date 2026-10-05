@@ -20,15 +20,17 @@ export type { DesktopUploadArtifact, DesktopUploadPlan } from '@deepseek-ai/dsh-
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
-const TARGETS = {
-  'mac-arm64': { platform: 'darwin', arch: 'arm64', os: 'mac' },
-  'mac-x64': { platform: 'darwin', arch: 'x64', os: 'mac' },
-  'win-x64': { platform: 'win32', arch: 'x64', os: 'win' },
-} as const satisfies Record<DesktopPackageTargetName, {
+// Upload serves the installer-owned update feed, which only the macOS and Windows targets have;
+// a Linux target has no plan here and is rejected by the guard in createDesktopUploadPlan.
+const TARGETS: Partial<Record<DesktopPackageTargetName, {
   readonly platform: NodeJS.Platform
   readonly arch: string
   readonly os: string
-}>
+}>> = {
+  'mac-arm64': { platform: 'darwin', arch: 'arm64', os: 'mac' },
+  'mac-x64': { platform: 'darwin', arch: 'x64', os: 'mac' },
+  'win-x64': { platform: 'win32', arch: 'x64', os: 'win' },
+}
 
 /** Filesystem and environment inputs used to validate one upload. */
 export interface DesktopUploadPlanOptions {
@@ -159,6 +161,10 @@ export async function createDesktopUploadPlan(
   targetName: DesktopPackageTargetName,
   options: DesktopUploadPlanOptions = {},
 ): Promise<DesktopUploadPlan> {
+  // An upload publishes an installer and its update feed; a Linux package carries neither.
+  if (targetName === 'linux-x64' || targetName === 'linux-arm64') {
+    throw new Error(`desktop upload: ${targetName} ships an AppImage with no installer-owned update`)
+  }
   const target = TARGETS[targetName]
   if (target === undefined) {
     throw new Error(`desktop upload: unsupported target ${String(targetName)}`)

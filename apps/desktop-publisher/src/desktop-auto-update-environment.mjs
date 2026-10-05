@@ -34,6 +34,9 @@ const UPDATE_ENVIRONMENTS = {
 }
 
 const UPDATE_TARGETS = new Set(['mac-arm64', 'mac-x64', 'win-x64'])
+// Linux Desktop builds ship an AppImage without an installer-owned update feed, so they are
+// release targets with build records but no entry in UPDATE_TARGETS.
+const RELEASE_TARGETS = new Set([...UPDATE_TARGETS, 'linux-x64', 'linux-arm64'])
 
 /**
  * Name the fixed installer object shared by uploading and cache refresh.
@@ -85,11 +88,11 @@ export function resolveDesktopAutoUpdateTarget(platform, arch) {
 
 /**
  * Return the local completion record filename for one packaged target.
- * @param {'mac-arm64' | 'mac-x64' | 'win-x64'} target - Supported release target.
+ * @param {'mac-arm64' | 'mac-x64' | 'win-x64' | 'linux-x64' | 'linux-arm64'} target - Supported release target.
  * @returns {string} Filename stored beside electron-builder artifacts.
  */
 export function desktopBuildRecordFilename(target) {
-  if (!UPDATE_TARGETS.has(target)) {
+  if (!RELEASE_TARGETS.has(target)) {
     throw new Error(`desktop auto-update: unsupported target ${target}`)
   }
   return `${target}-release.json`

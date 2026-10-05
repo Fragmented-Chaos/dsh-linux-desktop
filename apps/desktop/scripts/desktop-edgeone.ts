@@ -20,6 +20,10 @@ export type DesktopPurgeClient = Pick<InstanceType<typeof teo.v20220901.Client>,
 export function resolveDesktopPurgeConfig(
   env: NodeJS.ProcessEnv, target: DesktopPackageTargetName, publicUrl?: string,
 ): DesktopPurgeConfig {
+  // Purging refreshes the cached installer, and a Linux package ships none.
+  if (target === 'linux-x64' || target === 'linux-arm64') {
+    throw new DesktopPurgeError('desktop purge: Linux packages ship no cached installer')
+  }
   if (resolveDesktopAutoUpdateEnvironment(env) !== 'production') throw new DesktopPurgeError('desktop purge: production is required')
   const { platform, arch } = desktopTargetPlatform(target)
   const update = resolveDesktopUploadConfig(env, platform, arch)

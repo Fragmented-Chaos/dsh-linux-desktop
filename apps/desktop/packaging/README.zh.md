@@ -95,9 +95,12 @@ pnpm run package:desktop
 pnpm run package:desktop:mac:arm64
 pnpm run package:desktop:mac:x64
 pnpm run package:desktop:win:x64
+pnpm run package:desktop:linux:x64
 ```
 
-macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64。Linux 不是受支持的 Desktop 发布目标。
+macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64。Linux x64 与 Linux arm64 命令要求对应的 Linux 构建主机。
+
+Linux 目标产出 AppImage 而不是安装器。它把可执行文件名固定为 `deepseek-harness`（产品名含空格），并在桌面项中声明 `dsh` 协议与 `StartupWMClass`。每个 Linux 窗口自带窗口尺寸的图标：X11 把窗口图标存在 `_NET_WM_ICON` 里，该属性会静默丢弃与启动器图标同样大的图片，随后窗口就没有图标。Linux 窗口也显示产品名而不是当前会话名。Linux 目标不签名、也没有安装器持有的更新 feed，因此 `.env.linux` 既不需要签名身份也不需要发布凭据，不参与上传与更新 feed 校验，写出的构建记录不含更新字段，并禁用阻断式强制更新策略。
 
 macOS 正式发布和本地未签名 DMG 都通过 [electron-builder 配置](../scripts/electron-builder-config.mjs)中的 `dmg.format: 'ULMO'` 使用 LZMA 压缩。[构建时补丁](../../../patches/app-builder-lib@26.17.0.patch)为固定版本 builder 的校验规则和 TypeScript 声明添加此格式。
 

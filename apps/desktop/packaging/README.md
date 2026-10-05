@@ -95,9 +95,12 @@ Release automation uses fixed target commands so runtime preparation, dsh prepar
 pnpm run package:desktop:mac:arm64
 pnpm run package:desktop:mac:x64
 pnpm run package:desktop:win:x64
+pnpm run package:desktop:linux:x64
 ```
 
-The macOS arm64 command requires Apple Silicon. The macOS x64 command runs on Intel macOS or Apple Silicon with Rosetta. The Windows x64 command requires Windows x64. Linux is not a supported Desktop release target.
+The macOS arm64 command requires Apple Silicon. The macOS x64 command runs on Intel macOS or Apple Silicon with Rosetta. The Windows x64 command requires Windows x64. The Linux x64 and Linux arm64 commands require the matching Linux build host.
+
+A Linux target produces an AppImage rather than an installer. It fixes the executable name to `deepseek-harness` because the product name contains a space, and its desktop entry declares the `dsh` protocol and `StartupWMClass`. Each Linux window carries a window-sized icon of its own: X11 keeps a window icon in `_NET_WM_ICON`, which silently drops an image as large as the launcher icon and then leaves the window without one. A Linux window also names the product rather than the open session. Linux targets are unsigned and have no installer-owned update feed, so `.env.linux` needs neither a signing identity nor release credentials, takes no part in upload or update-feed verification, writes a build record without update fields, and disables the blocking mandatory-update policy.
 
 Both release and local unsigned macOS DMGs use LZMA compression (`dmg.format: 'ULMO'`) in [the electron-builder configuration](../scripts/electron-builder-config.mjs). A [build-time patch](../../../patches/app-builder-lib@26.17.0.patch) adds this format to the pinned builder's validation and TypeScript declarations.
 

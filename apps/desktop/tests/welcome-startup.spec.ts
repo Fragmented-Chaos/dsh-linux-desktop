@@ -84,6 +84,7 @@ vi.mock('electron', () => ({
     moveTop = state.moveTopWorkspace
     hide = vi.fn()
     setBackgroundColor = vi.fn()
+    setTitle = vi.fn()
     show = state.showWorkspace
     showInactive = state.showInactiveWorkspace
     async loadURL(url: string) { state.contents = this.webContents; await state.loadWorkspace(url); this.ready?.() }

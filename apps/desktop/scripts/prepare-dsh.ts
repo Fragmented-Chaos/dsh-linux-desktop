@@ -5,8 +5,9 @@ import { spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, relative, resolve } from 'node:path'
+import { load } from 'js-yaml'
 import { desktopNodeEnvironment } from '../src/node-environment.ts'
-import { createRuntimeProjectMetadata } from '../src/project-manager.ts'
+import { createRuntimeProjectMetadata, type RuntimeDependencyPatch } from '../src/project-manager.ts'
 import { DESKTOP_HOST_PROTOCOL_VERSION } from '../src/host-protocol.ts'
 import { parseDesktopRelease, type DesktopRelease } from '../src/release.ts'
 import {
@@ -34,6 +35,9 @@ import { desktopRuntimeFileExclusion } from './runtime-file-policy.ts'
 import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
+const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
+/** Package whose runtime ASAR behaviour requires the repository's vendored patch. */
+const LIBREOFFICE_KIT_PACKAGE = '@deepseek-ai/libreoffice-kit'
 const BUILD_PATHS = resolveDesktopTargetBuildPaths()
 const DSH_OUTPUT_ROOT = BUILD_PATHS.dsh
 const BUILD_ROOT = mkdtempSync(join(tmpdir(), 'dsh-desktop-runtime-'))
@@ -41,7 +45,8 @@ const STORE_ROOT = join(BUILD_ROOT, 'store')
 const RUNTIME_ROOT = BUILD_PATHS.runtime
 const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
 const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
-const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
+const TARGET = desktopTargetPlatform(resolveDesktopBuildTarget())
+const NODE = join(BUILD_PATHS.electron, TARGET.platform === 'win32' ? 'electron.exe' : TARGET.platform === 'linux' ? 'electron' : 'Electron.app/Contents/MacOS/Electron')
 const PNPM = join(RUNTIME_ROOT, 'pnpm', 'bin', 'pnpm.mjs')
 
 function manifestVersion(path: string, subject: string): string {
@@ -64,6 +69,25 @@ function desktopRelease(): DesktopRelease {
     nodeVersion: runtime.node,
     pnpmVersion: runtime.pnpm,
   })
+}
+
+/**
+ * Select the repository dependency patches the runtime install must reapply.
+ *
+ * The runtime loads `@deepseek-ai/libreoffice-kit` from inside the packaged ASAR, where Electron
+ * reports a missing path as null instead of undefined. The repository patch corrects that probe, so
+ * the engine resolver reaches its Linux WASM fallback instead of reporting an incomplete native
+ * install. Only the kit's entry is carried: it is the single patched package the runtime closure
+ * installs.
+ * @returns Patch entries copied into the runtime project.
+ */
+function runtimeDependencyPatches(): readonly RuntimeDependencyPatch[] {
+  const workspace = load(readFileSync(join(REPOSITORY_ROOT, 'pnpm-workspace.yaml'), 'utf8')) as {
+    patchedDependencies?: Record<string, string>
+  } | undefined
+  return Object.entries(workspace?.patchedDependencies ?? {})
+    .filter(([specifier]) => specifier.startsWith(`${LIBREOFFICE_KIT_PACKAGE}@`))
+    .map(([specifier, patchPath]) => ({ specifier, source: join(REPOSITORY_ROOT, patchPath) }))
 }
 
 function runPnpm(args: readonly string[]): Promise<void> {
@@ -120,7 +144,7 @@ async function main(): Promise<void> {
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:stage-packages', async () => {
       copyFileSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGE_SET_FILE), join(BUILD_ROOT, DESKTOP_PACKAGE_SET_FILE))
       cpSync(join(PACKAGE_SET_ROOT, DESKTOP_PACKAGES_DIR), join(BUILD_ROOT, DESKTOP_PACKAGES_DIR), { recursive: true })
-      createRuntimeProjectMetadata(BUILD_ROOT, release)
+      createRuntimeProjectMetadata(BUILD_ROOT, release, runtimeDependencyPatches())
     })
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:lockfile', () => runPnpm(['install', '--lockfile-only']))
     verifyDesktopCoreLockfile(
@@ -129,8 +153,7 @@ async function main(): Promise<void> {
     )
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:install', () => runPnpm(['install', '--prod', '--frozen-lockfile', '--trust-lockfile']))
     const packageSet = readDesktopCorePackageSet(BUILD_ROOT, release.version)
-    const targetName = resolveDesktopBuildTarget()
-    const target = { platform: process.platform, arch: desktopTargetPlatform(targetName).arch }
+    const target = { platform: TARGET.platform, arch: TARGET.arch }
     const modules = join(BUILD_ROOT, 'node_modules')
     const officeManifest = JSON.parse(readFileSync(join(modules, '@deepseek-ai/libreoffice-kit/package.json'), 'utf8'))
     const officeEngine = selectOfficeEngine(officeManifest, target)

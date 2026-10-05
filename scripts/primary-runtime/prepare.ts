@@ -34,10 +34,31 @@ export async function downloadPrimaryRuntimeAsset(url: string, sha256: string, c
   return destination
 }
 
+/**
+ * Environment variable that replaces the github.com directory holding the pinned
+ * python-build-standalone release. A mirror serving the same archives under its own path, such as
+ * `https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone/<release>`, lets a
+ * network that cannot reach github.com prepare the same checksum-verified payload.
+ */
+export const PRIMARY_RUNTIME_PYTHON_BASE_URL_ENV = 'DSH_PRIMARY_RUNTIME_PYTHON_BASE_URL'
+
+/**
+ * Resolve the release directory one target's Python archive is downloaded from.
+ * @param environment - Build environment carrying the optional mirror override.
+ * @returns Base URL of the release directory, without a trailing slash.
+ */
+export function primaryRuntimePythonBaseUrl(environment: NodeJS.ProcessEnv = process.env): string {
+  const override = environment[PRIMARY_RUNTIME_PYTHON_BASE_URL_ENV]?.trim()
+  if (override === undefined || override === '') {
+    return `https://github.com/astral-sh/python-build-standalone/releases/download/${lock.pythonRelease}`
+  }
+  return override.replace(/\/+$/u, '')
+}
+
 async function pythonArchive(target: keyof typeof lock.targets, cache: string): Promise<string> {
   const artifact = lock.targets[target]
   const filename = `cpython-${lock.pythonVersion}+${lock.pythonRelease}-${artifact.pythonTarget}-install_only_stripped.tar.gz`
-  return downloadPrimaryRuntimeAsset(`https://github.com/astral-sh/python-build-standalone/releases/download/${lock.pythonRelease}/${encodeURIComponent(filename)}`, artifact.pythonSha256, cache)
+  return downloadPrimaryRuntimeAsset(`${primaryRuntimePythonBaseUrl()}/${encodeURIComponent(filename)}`, artifact.pythonSha256, cache)
 }
 
 /**

@@ -90,7 +90,10 @@ export function createElectronBuilderConfig(
   if (windowsSigner !== undefined) {
     installWindowsNsisBootstrapSigner({ sign: windowsSigner })
   }
-  const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+  // A Linux AppImage ships no installer-owned update feed, so the packager is configured without one.
+  const update = unsigned || resolvedPlatform === 'linux'
+    ? undefined
+    : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   // electron-builder merges extraMetadata into the packaged manifest, so a build version here reaches
   // the artifact names, the update feed, and the installed app.getVersion() the updater compares against.
@@ -103,6 +106,9 @@ export function createElectronBuilderConfig(
     extraMetadata: {
       dshDesktopAppId: appId,
       dshMandatoryUpdatePolicy: policy,
+      // Linux desktop environments associate a running window with its launcher through WM_CLASS, which
+      // Electron derives from this name; the other platforms ignore the field.
+      desktopName: 'deepseek-harness',
       ...buildVersion === productVersion ? {} : { version: buildVersion },
       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
     },
@@ -232,6 +238,31 @@ export function createElectronBuilderConfig(
     },
     linux: {
       category: 'Development',
+      icon: fileURLToPath(new URL('../resources/icon-linux.png', import.meta.url)),
+      // `_NET_WM_ICON` drops an image as large as the launcher icon, so the window-sized copy ships
+      // beside it for the icon each window carries.
+      extraResources: [
+        { from: fileURLToPath(new URL('../resources/icon-linux-window.png', import.meta.url)), to: 'icon-window.png' },
+        // A redistributed binary has to carry the MIT notice and the generated third-party notices,
+        // which are also what disclose the dependency licences and the local patches this build
+        // applies. Neither file reaches the payload on its own.
+        { from: fileURLToPath(new URL('../../../LICENSE', import.meta.url)), to: 'LICENSE' },
+        { from: fileURLToPath(new URL('../../../THIRD_PARTY_NOTICES.md', import.meta.url)), to: 'THIRD_PARTY_NOTICES.md' },
+      ],
+      // The product name contains a space, so the launcher, the .desktop entry and the `dsh` command
+      // expect a stable file name of their own; the protocol the macOS and Windows builds register
+      // has to be declared here as well, because Linux resolves schemes from the desktop entry.
+      executableName: 'deepseek-harness',
+      // Write the desktop entry's StartupWMClass from `desktopName`, so a running window is attributed
+      // to this launcher instead of becoming a second taskbar entry.
+      syncDesktopName: true,
+      desktop: {
+        entry: {
+          Name: 'DeepSeek Harness',
+          Categories: 'Development;Utility;',
+          MimeType: 'x-scheme-handler/dsh;',
+        },
+      },
       target: ['AppImage'],
     },
     nsis: {

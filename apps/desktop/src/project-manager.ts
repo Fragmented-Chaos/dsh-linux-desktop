@@ -1,6 +1,7 @@
 /** Desktop profile initialization and native recovery. */
 
 import {
+  copyFileSync,
   existsSync,
   fsyncSync,
   lstatSync,
@@ -13,7 +14,7 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   DESKTOP_HOST_PACKAGE,
   desktopCorePackageOverrides,
@@ -35,17 +36,23 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
 }
 
-function workspaceFile(overrides: Readonly<Record<string, string>> = {}): string {
+function workspaceFile(
+  overrides: Readonly<Record<string, string>> = {},
+  patches: readonly RuntimeDependencyPatch[] = [],
+): string {
   const entries = Object.entries(overrides).sort(([left], [right]) => left.localeCompare(right))
   const overrideSection = entries.length === 0
     ? ''
     : `overrides:\n${entries.map(([name, spec]) => `  ${JSON.stringify(name)}: ${JSON.stringify(spec)}`).join('\n')}\n`
-  if (entries.length === 0) return `packages:\n  - .\n\n${WORKSPACE_SETTINGS}`
+  const patchSection = patches.length === 0
+    ? ''
+    : `patchedDependencies:\n${patches.map(patch => `  ${JSON.stringify(patch.specifier)}: ${JSON.stringify(join('patches', basename(patch.source)))}`).join('\n')}\n`
+  if (entries.length === 0) return `packages:\n  - .\n\n${WORKSPACE_SETTINGS}${patchSection}`
   const coreBuildSpec = overrides[CORE_BUILD_PACKAGE]
   const coreBuildKey = coreBuildSpec === undefined
     ? CORE_BUILD_PACKAGE
     : `${CORE_BUILD_PACKAGE}@${coreBuildSpec.replace('file:./', 'file:')}`
-  return `packages:\n  - .\n\n${overrideSection}${WORKSPACE_SETTINGS}allowBuilds:\n  node-pty: true\n  koffi: true\n  fs-ext: true\n  ${JSON.stringify(coreBuildKey)}: true\n  '@google/genai': false\n  protobufjs: false\n  node-addon-require-builtin: false\n`
+  return `packages:\n  - .\n\n${overrideSection}${WORKSPACE_SETTINGS}${patchSection}allowBuilds:\n  node-pty: true\n  koffi: true\n  fs-ext: true\n  ${JSON.stringify(coreBuildKey)}: true\n  '@google/genai': false\n  protobufjs: false\n  node-addon-require-builtin: false\n`
 }
 
 function migrateProfileSettings(projectDir: string): void {
@@ -130,8 +137,33 @@ export class DesktopProjectManager {
   }
 }
 
+/** One packed dependency patch the runtime install must reapply inside the runtime project. */
+export interface RuntimeDependencyPatch {
+  /** `patchedDependencies` key: package name and the exact version the patch applies to. */
+  readonly specifier: string
+  /** Absolute path of the patch file, copied beside the generated workspace file. */
+  readonly source: string
+}
+
+/**
+ * Copy each patch beside the runtime project that names it.
+ * @param projectDir - Disposable runtime project directory.
+ * @param patches - Patches the runtime install must reapply.
+ * @returns Nothing.
+ */
+function stageRuntimePatches(projectDir: string, patches: readonly RuntimeDependencyPatch[]): void {
+  if (patches.length === 0) return
+  const destination = join(projectDir, 'patches')
+  mkdirSync(destination, { recursive: true, mode: 0o700 })
+  for (const patch of patches) copyFileSync(patch.source, join(destination, basename(patch.source)))
+}
+
 /** Create build-only project metadata for materializing the signed runtime. */
-export function createRuntimeProjectMetadata(projectDir: string, release: DesktopRelease): void {
+export function createRuntimeProjectMetadata(
+  projectDir: string,
+  release: DesktopRelease,
+  patches: readonly RuntimeDependencyPatch[] = [],
+): void {
   mkdirSync(projectDir, { recursive: true, mode: 0o700 })
   const packageSet = verifyDesktopCorePackageSet(projectDir, release.version)
   const manifest = {
@@ -144,9 +176,10 @@ export function createRuntimeProjectMetadata(projectDir: string, release: Deskto
   writeJson(join(projectDir, 'package.json'), manifest)
   writeFileSync(
     join(projectDir, 'pnpm-workspace.yaml'),
-    workspaceFile(desktopCorePackageOverrides(packageSet)),
+    workspaceFile(desktopCorePackageOverrides(packageSet), patches),
     { mode: 0o600 },
   )
+  stageRuntimePatches(projectDir, patches)
 }
 
 /**

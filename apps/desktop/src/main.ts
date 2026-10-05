@@ -203,6 +203,37 @@ function platformLoginUrl(authorizeUrl: string): string {
   return url.href
 }
 
+/** Product name the shell reports to the operating system, independent of the UI language. */
+const PRODUCT_NAME = 'DeepSeek Harness'
+
+/**
+ * Resolve the application icon this build ships.
+ *
+ * macOS reads the icon from its bundle and Windows embeds one in the executable, so this path only
+ * feeds the About panel there.
+ * @returns Absolute path of the shipped launcher icon.
+ */
+function applicationIcon(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(app.getAppPath(), 'resources', 'icon-windows.png')
+}
+
+/**
+ * Resolve the icon a Linux window carries.
+ *
+ * macOS and Windows take the window icon from the bundle or the executable, but X11 keeps it in
+ * `_NET_WM_ICON`, and that property drops an image as large as the launcher icon. The window then
+ * shows no icon at all, costing the title bar and the taskbar entry theirs, so the build ships a
+ * window-sized copy for this property alone.
+ * @returns Absolute path of the shipped window icon.
+ */
+function windowIcon(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon-window.png')
+    : join(app.getAppPath(), 'resources', 'icon-linux-window.png')
+}
+
 function createWindow(preload: string, show = false, primary = false): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -210,6 +241,7 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     minWidth: 520,
     minHeight: 600,
     show,
+    ...(process.platform === 'linux' ? { icon: windowIcon() } : {}),
     ...(process.platform === 'win32' && primary ? {
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
@@ -240,6 +272,13 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
     return { action: 'deny' }
   })
+  if (process.platform === 'linux') {
+    // A Linux window names the product instead of the open session. The page title repeats the
+    // session name the sidebar already shows, and Linux surfaces a window title in the title bar,
+    // the taskbar entry and every window list, where the repetition crowds out the product name.
+    window.setTitle(PRODUCT_NAME)
+    window.on('page-title-updated', (event) => { event.preventDefault() })
+  }
   if (process.platform === 'darwin' || process.platform === 'win32') {
     // Fullscreen hides native window controls; overlays drop their caption clearance.
     const sendFullscreen = (): void => {
@@ -922,10 +961,9 @@ async function main(): Promise<void> {
     updates.dispose()
   })
 
-  const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
-    : join(process.resourcesPath, 'icon.png')
+  const applicationIconPath = applicationIcon()
   app.setAboutPanelOptions({
-    applicationName: 'DeepSeek Harness',
+    applicationName: PRODUCT_NAME,
     applicationVersion: app.getVersion(),
     // The release has no separate build number; omit Electron's bundle version.
     version: '',
@@ -1294,33 +1332,36 @@ async function main(): Promise<void> {
         () => mandatoryUI?.confirmationWindow ?? currentDialogWindow(),
         (event) => { console.info(`desktop policy authentication: ${event}`); updateJournal?.action(`policy-login-${event}`) })
     }
-    if (!['win32', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch)) throw new Error('desktop policy: unsupported platform')
-    let wasBlocking = false
-    mandatoryPolicy = new DesktopMandatoryUpdatePolicy(policyConfig, {
-      platform: process.platform as 'win32' | 'darwin', arch: process.arch as 'x64' | 'arm64',
-      bundledDshVersion: app.isPackaged ? readDesktopRuntime(resources.dsh).release.version : app.getVersion(),
-    }, (state) => {
-      if (state.error !== 'authentication-required') policyAuthenticationQueued = false
-      if (state.blocking) {
-        for (const controller of ordinaryDialogs) controller.abort()
-        if (!wasBlocking) updateDialog.cancel()
-      }
-      mandatoryUI?.sync()
-      if (state.blocking && !wasBlocking) void updateSchedule.check(false, true).catch((error: unknown) => { console.error(error) })
-      wasBlocking = state.blocking
-    }, policyAuth?.request, () => desktopClientMetadata(locale.id))
-    const policy = mandatoryPolicy
-    mandatoryUI = new DesktopMandatoryUpdateWindow({
-      overlays: updateOverlays,
-      preload: fileURLToPath(new URL('./preload-mandatory.cjs', import.meta.url)), locale,
-      allowedPageOrigins: policyConfig.allowedPageOrigins, parent: () => mainWindow,
-      policy: () => policy.state, update: () => updates.state,
-      refresh: async () => { await Promise.all([checkPolicyManually(), updateSchedule.check(true)]) },
-      download: downloadUpdate, install: version => updates.install(version),
-    })
-    void mandatoryPolicy.check('launch').then((state) => {
-      if (app.isPackaged && state.error === 'authentication-required' && !isQuitting()) queuePolicyAuthentication()
-    }).catch((error: unknown) => { console.error(error) })
+    // A Linux package ships no installer-owned update path, so it cannot honor a mandatory update;
+    // the blocking policy stays disabled there instead of failing the whole shell.
+    if (['win32', 'darwin'].includes(process.platform) && ['x64', 'arm64'].includes(process.arch)) {
+      let wasBlocking = false
+      mandatoryPolicy = new DesktopMandatoryUpdatePolicy(policyConfig, {
+        platform: process.platform as 'win32' | 'darwin', arch: process.arch as 'x64' | 'arm64',
+        bundledDshVersion: app.isPackaged ? readDesktopRuntime(resources.dsh).release.version : app.getVersion(),
+      }, (state) => {
+        if (state.error !== 'authentication-required') policyAuthenticationQueued = false
+        if (state.blocking) {
+          for (const controller of ordinaryDialogs) controller.abort()
+          if (!wasBlocking) updateDialog.cancel()
+        }
+        mandatoryUI?.sync()
+        if (state.blocking && !wasBlocking) void updateSchedule.check(false, true).catch((error: unknown) => { console.error(error) })
+        wasBlocking = state.blocking
+      }, policyAuth?.request, () => desktopClientMetadata(locale.id))
+      const policy = mandatoryPolicy
+      mandatoryUI = new DesktopMandatoryUpdateWindow({
+        overlays: updateOverlays,
+        preload: fileURLToPath(new URL('./preload-mandatory.cjs', import.meta.url)), locale,
+        allowedPageOrigins: policyConfig.allowedPageOrigins, parent: () => mainWindow,
+        policy: () => policy.state, update: () => updates.state,
+        refresh: async () => { await Promise.all([checkPolicyManually(), updateSchedule.check(true)]) },
+        download: downloadUpdate, install: version => updates.install(version),
+      })
+      void mandatoryPolicy.check('launch').then((state) => {
+        if (app.isPackaged && state.error === 'authentication-required' && !isQuitting()) queuePolicyAuthentication()
+      }).catch((error: unknown) => { console.error(error) })
+    }
   }
   automaticCheck()
   await reconcileBackend().catch(() => undefined)

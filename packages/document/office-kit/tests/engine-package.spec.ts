@@ -78,7 +78,7 @@ it('uses physical native paths and preserves the WASM logical path in an archive
     .toBe('/App/resources/app.asar/dsh/node_modules/@deepseek-ai/libreoffice-kit-wasm/package.json')
 })
 
-it.each(['missing manifest', 'dangling symlink', 'absent'] as const)(
+it.each(['missing manifest', 'dangling symlink', 'absent', 'asar null'] as const)(
   'distinguishes an engine package with %s on the kit resolution path', (state) => {
     const fixture = engineTree()
     if (state === 'missing manifest') mkdirSync(fixture.directory, { recursive: true })
@@ -86,10 +86,12 @@ it.each(['missing manifest', 'dangling symlink', 'absent'] as const)(
       mkdirSync(dirname(fixture.directory), { recursive: true })
       symlinkSync(join(fixture.root, 'missing-target'), fixture.directory, 'junction')
     }
+    // Electron's ASAR filesystem reports a missing path as null instead of undefined.
+    if (state === 'asar null') vi.mocked(lstatSync).mockImplementation(() => null as never)
     const error = thrownBy(() => fixture.resolveEnginePackage(fixture.name))
     const nodeError: unknown = fixture.resolve.mock.results[0]?.value
     expect(nodeError).toMatchObject({ code: 'MODULE_NOT_FOUND' })
-    if (state === 'absent') {
+    if (state === 'absent' || state === 'asar null') {
       expect(error).toBe(nodeError)
     } else {
       expect(error).toBeInstanceOf(Error)
